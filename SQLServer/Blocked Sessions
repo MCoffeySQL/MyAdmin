@@ -1,0 +1,21 @@
+--Identify blocked and blocking sessions
+
+SELECT 
+  dmConnections.session_id AS blockingSessionID,
+  dmSessions.login_name AS blockingUser,
+  dmSessions.[host_name] AS blockingHost,
+  dmRequests.session_id AS blockedSessionID,
+  USER_NAME(dmRequests.[user_id]) AS blockedUser,
+  dmWaitingTasks.wait_type AS blockingReason,
+  blockingSQL.[text] AS blockingSQL,
+  DB_NAME(dmRequests.database_id) AS databaseName
+FROM sys.dm_exec_connections AS dmConnections  --blocking
+INNER JOIN sys.dm_exec_requests AS dmRequests  --blocked
+  ON dmConnections.session_id = dmRequests.blocking_session_id
+INNER JOIN sys.dm_os_waiting_tasks AS dmWaitingTasks  --waits
+  ON dmRequests.session_id = dmWaitingTasks.session_id
+RIGHT OUTER JOIN sys.dm_exec_sessions AS dmSessions --sess
+  ON dmConnections.session_id = dmSessions.session_id
+CROSS APPLY sys.dm_exec_sql_text(dmConnections.most_recent_sql_handle) AS blockingSQL
+CROSS APPLY sys.dm_exec_sql_text(dmRequests.[sql_handle]) AS blockedSQL
+ORDER BY blockingSessionID,blockedSessionID
