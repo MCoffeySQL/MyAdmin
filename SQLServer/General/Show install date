@@ -1,0 +1,9 @@
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+
+SELECT 
+  @@SERVERNAME AS serverName,
+  create_date AS installDate
+FROM sys.server_principals
+WHERE name = 'nt authority\system'
+  OR name = 'nt authority\network service'
+OPTION (RECOMPILE);
