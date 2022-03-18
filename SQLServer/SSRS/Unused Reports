@@ -1,0 +1,21 @@
+DECLARE
+  @dateStart DATE = '1/1/2014' 
+	
+SELECT
+  reportCatalog.[name],
+  reportCatalog.[path],
+  COUNT(executionLog.timeStart) AS cItems
+FROM(
+  SELECT 
+    [name],
+    [path]
+  FROM [catalog]
+  WHERE [type] = 2 
+    AND [hidden] = 0
+) AS reportCatalog
+LEFT JOIN executionLog 
+  ON executionLog.reportID = reportCatalog.itemID
+    AND executionLog.timeStart >= @dateStart
+GROUP BY reportCatalog.[name], reportCatalog.[path]
+ORDER BY cItems ASC,
+  reportCatalog.[path]
