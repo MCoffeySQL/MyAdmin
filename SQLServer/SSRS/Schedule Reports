@@ -1,0 +1,25 @@
+USE [reportserver2];  -- change database name
+GO
+
+SELECT
+	users.userName AS subscriptionOwner,
+	subscriptions.modifiedDate,
+	subscriptions.[description],
+	subscriptions.eventType,
+	subscriptions.deliveryExtension,
+	subscriptions.lastStatus,
+	subscriptions.lastRunTime,
+	schedule.nextRunTime,
+	schedule.[name] AS scheduleName,
+	subscriptionCatalog.[path] AS reportPath,
+	subscriptionCatalog.[description] AS reportDescription
+FROM dbo.subscriptions
+INNER JOIN dbo.users
+  ON subscriptions.ownerid = users.userid
+INNER JOIN dbo.[catalog] AS subscriptionCatalog
+  ON subscriptions.report_oid = subscriptionCatalog.itemid
+INNER JOIN dbo.reportSchedule
+  ON subscriptions.report_oid = reportSchedule.reportid
+    AND subscriptions.subscriptionid = reportSchedule.subscriptionid
+INNER JOIN dbo.schedule
+  ON reportSchedule.scheduleid = schedule.scheduleid
