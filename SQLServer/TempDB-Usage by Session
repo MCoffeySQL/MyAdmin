@@ -1,0 +1,24 @@
+--Temp DB usage by session
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+SET NOCOUNT ON
+
+SELECT 
+  dm_execSessions.session_id,
+  dm_execConnnections.connection_id,
+  dm_execSessions.login_name,
+  dm_execSessions.[host_name],
+  dm_execSQLtext.[text],
+  db_sessionSpaceUsed.user_objects_alloc_page_count,
+  db_sessionSpaceUsed.user_objects_dealloc_page_count,
+  db_sessionSpaceUsed.internal_objects_alloc_page_count,
+  db_sessionSpaceUsed.internal_objects_dealloc_page_count,
+  dm_execConnnections.last_read,
+  dm_execConnnections.last_write,
+  dm_execSessions.[program_name]
+FROM sys.dm_db_session_space_usage AS db_sessionSpaceUsed
+INNER JOIN sys.dm_exec_sessions AS dm_execSessions
+  ON db_sessionSpaceUsed.session_id = dm_execSessions.session_id
+LEFT OUTER JOIN sys.dm_exec_connections AS dm_execConnnections
+  ON db_sessionSpaceUsed.session_id = dm_execConnnections.most_recent_session_id
+OUTER APPLY sys.dm_exec_sql_text(dm_execConnnections.most_recent_sql_handle) AS dm_execSQLtext
+WHERE db_sessionSpaceUsed.session_id > 50
