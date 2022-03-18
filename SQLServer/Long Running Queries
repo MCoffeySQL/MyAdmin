@@ -1,0 +1,50 @@
+SET NOCOUNT ON
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+
+DECLARE 
+  @returnRows INT = 50
+
+SELECT TOP (@returnRows)
+  DB_NAME(queryText.[dbid]) AS databaseName,
+  OBJECT_NAME(queryText.[objectid]) AS objectName,
+  CAST(queryStats.total_elapsed_time / 1000000.0 AS NUMERIC(28, 2)) AS [durationTotal_seconds],
+  CAST(queryStats.total_worker_time * 100.0 / queryStats.total_elapsed_time AS NUMERIC(28, 2)) AS cpuPercent,
+  CAST((queryStats.total_elapsed_time - queryStats.total_worker_time) * 100.0 / queryStats.total_elapsed_time AS DECIMAL(28, 2)) AS waitingPercent,
+  queryStats.execution_count AS executionCount,
+  CAST(queryStats.total_elapsed_time / 1000000.0 / queryStats.execution_count AS NUMERIC(28, 2)) AS durationAverage_seconds,
+  SUBSTRING (queryText.[text],(queryStats.statement_start_offset/2) + 1,
+    ((
+	 CASE 
+        WHEN queryStats.statement_end_offset = -1
+        THEN LEN(CONVERT(NVARCHAR(MAX), queryText.text)) * 2
+        ELSE queryStats.statement_end_offset
+      END - queryStats.statement_start_offset)/2) + 1) AS query,
+  queryText.text AS parentQuery,
+  queryPlan.query_plan,
+  queryStats.plan_generation_num,
+  queryStats.execution_count,
+  queryStats.creation_time,
+  queryStats.last_execution_time,
+  queryStats.total_physical_reads,
+  queryStats.min_physical_reads,
+  queryStats.max_physical_reads,
+  queryStats.total_logical_reads,
+  queryStats.min_logical_reads,
+  queryStats.max_logical_reads,
+  queryStats.total_logical_writes,
+  queryStats.min_logical_writes,
+  queryStats.max_logical_writes,
+  queryStats.total_elapsed_time,
+  queryStats.last_elapsed_time,
+  queryStats.min_elapsed_time,
+  queryStats.max_elapsed_time,
+  queryStats.total_rows,
+  queryStats.last_rows,
+  queryStats.min_rows,
+  queryStats.max_rows
+FROM sys.dm_exec_query_stats AS queryStats
+CROSS APPLY sys.dm_exec_sql_text(queryStats.[sql_handle]) AS queryText
+CROSS APPLY sys.dm_exec_query_plan(queryStats.plan_handle) AS queryPlan
+WHERE queryStats.total_elapsed_time > 0
+  AND DB_NAME(queryText.[dbid]) IS NOT NULL 
+ORDER BY queryStats.total_elapsed_time DESC
