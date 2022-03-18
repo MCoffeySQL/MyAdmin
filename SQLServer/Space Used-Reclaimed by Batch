@@ -1,0 +1,35 @@
+--Space used and reclaimed in tempdb for completed by batches
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+SET NOCOUNT ON
+
+SELECT 
+  CAST(SUM(db_sessionSpaceUsage.user_objects_alloc_page_count + db_sessionSpaceUsage.internal_objects_alloc_page_count) * 
+    (8.0/1024.0) AS DECIMAL(20,3)) AS [spaceUsed(MB)],
+  CAST(SUM(db_sessionSpaceUsage.user_objects_alloc_page_count - db_sessionSpaceUsage.user_objects_dealloc_page_count + 
+    db_sessionSpaceUsage.internal_objects_alloc_page_count - db_sessionSpaceUsage.internal_objects_dealloc_page_count)* 
+    (8.0/1024.0) AS DECIMAL(20,3)) AS [spaceStillUsed(MB)],
+  db_sessionSpaceUsage.session_id,
+  dm_execConnections.connection_id,
+  dm_execSessions.login_name,
+  dm_execSessions.[host_name],
+  dm_execSqlText.[text] AS [lastQuery],
+  dm_execConnections.last_read,
+  dm_execConnections.last_write,
+  dm_execSessions.[program_name]
+FROM sys.dm_db_session_space_usage AS db_sessionSpaceUsage
+INNER JOIN sys.dm_exec_sessions AS dm_execSessions 
+  ON db_sessionSpaceUsage.session_id = dm_execSessions.session_id
+LEFT OUTER JOIN sys.dm_exec_connections AS dm_execConnections
+  ON db_sessionSpaceUsage.session_id = dm_execConnections.most_recent_session_id
+OUTER APPLY sys.dm_exec_sql_text(dm_execConnections.most_recent_sql_handle) AS dm_execSqlText
+WHERE db_sessionSpaceUsage.session_id > 50
+GROUP BY 
+  db_sessionSpaceUsage.session_id, 
+  dm_execConnections.connection_id, 
+  dm_execSessions.login_name, 
+  dm_execSessions.[host_name],
+  dm_execSqlText.[text], 
+  dm_execConnections.last_read, 
+  dm_execConnections.last_write, 
+  dm_execSessions.[program_name]
+ORDER BY [SpaceStillUsed(MB)] DESC
