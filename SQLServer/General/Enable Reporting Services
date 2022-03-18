@@ -1,0 +1,2 @@
+UPDATE dbo.systemPerformance
+SET disableReportServerReports = 0
