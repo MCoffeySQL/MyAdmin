@@ -1,0 +1,23 @@
+SET NOCOUNT ON
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+
+DECLARE 
+  @returnRows INT = 50
+
+SELECT TOP (@returnRows)
+  DB_NAME(sqlText.[dbid]) AS DatabaseName,
+  queryStats.total_logical_reads + queryStats.total_logical_writes AS totalIO,
+  (queryStats.total_logical_reads + queryStats.total_logical_writes) / queryStats.execution_count AS averageIO,
+  queryStats.execution_count AS executionCount,
+  SUBSTRING (sqlText.[text],(queryStats.statement_start_offset/2) + 1,
+  ((CASE 
+      WHEN queryStats.statement_end_offset = -1
+      THEN LEN(CONVERT(NVARCHAR(MAX), sqlText.[text])) * 2
+      ELSE queryStats.statement_end_offset
+  END - queryStats.statement_start_offset)/2) + 1) AS query,
+  sqlText.[text] AS parentQuery,
+  queryPlan.query_plan
+FROM sys.dm_exec_query_stats AS queryStats
+CROSS APPLY sys.dm_exec_sql_text(queryStats.[sql_handle]) AS sqlText
+CROSS APPLY sys.dm_exec_query_plan(queryStats.plan_handle) AS queryPlan
+ORDER BY totalIO DESC
