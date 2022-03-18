@@ -1,0 +1,22 @@
+--TempDB Usage by Task
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+SELECT 
+  dm_execSessions.session_id,
+  dm_execConnections.connection_id,
+  dm_execSessions.login_name,
+  dm_execSessions.[host_name],
+  st.[text],
+  db_taskSpaceUsage.user_objects_alloc_page_count,
+  db_taskSpaceUsage.user_objects_dealloc_page_count,
+  db_taskSpaceUsage.internal_objects_alloc_page_count,
+  db_taskSpaceUsage.internal_objects_dealloc_page_count,
+  dm_execConnections.last_read,
+  dm_execConnections.last_write,
+  dm_execSessions.[program_name]
+FROM sys.dm_db_task_space_usage AS db_taskSpaceUsage
+INNER JOIN sys.dm_exec_sessions AS dm_execSessions
+  ON db_taskSpaceUsage.session_id = dm_execSessions.session_id
+LEFT OUTER JOIN sys.dm_exec_connections AS dm_execConnections
+  ON db_taskSpaceUsage.session_id = dm_execConnections.most_recent_session_id
+OUTER APPLY sys.dm_exec_sql_text(dm_execConnections.most_recent_sql_handle) st
+WHERE db_taskSpaceUsage.session_id > 50
