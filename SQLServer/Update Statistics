@@ -1,0 +1,165 @@
+DECLARE
+  @sql NVARCHAR(4000) = '',
+  @id INT,
+  @status VARCHAR(5),
+  @startTime DATETIME,
+  @databaseName NVARCHAR(255)
+  @counter TINYINT = 0 --debugging
+  @maxCounter TINYINT = 10 --debugging
+
+--If temp table exists drop it 
+  IF OBJECT_ID('tempdb..#indexUsage')IS NOT NULL
+    DROP TABLE #indexUsage
+
+  IF OBJECT_ID('tempdb..#databaseName')IS NOT NULL
+    DROP TABLE #databaseName
+
+CREATE TABLE #databaseName(
+  databaseName NVARCHAR(255) NOT NULL,
+  processed TINYINT NULL
+)
+
+INSERT INTO #databaseName(
+  databaseName
+)
+VALUES
+  ('master'),
+  ('model'),
+  ('msdb')
+--**('DatabaseName)**--
+
+CREATE TABLE #indexUsage (
+  id INT IDENTITY(1,1) NOT NULL,
+  databaseName NVARCHAR(60) NULL,
+  schemaName NVARCHAR(9) NULL,
+  tableName NVARCHAR(60) NULL,
+  indexName NVARCHAR(255) NULL,
+  indexType NVARCHAR(24) NULL,
+  statsLastTaken DATETIME,
+  rowCnt BIGINT,
+  rowmodctr BIGINT,
+  sqlString NVARCHAR(4000),
+  startDate DATETIME,
+  endDate DATETIME,
+  elapsedTime VARCHAR(24),
+  [status] VARCHAR(2000)
+)
+
+WHILE EXISTS(SELECT 1 FROM #databaseName WHERE processed IS NULL)
+  BEGIN
+    SELECT TOP 1 
+      @databaseName = databaseName
+    FROM #databaseName
+    WHERE processed IS NULL
+
+    SET @sql = 'USE ' + @databaseName + '
+      INSERT INTO #IndexUsage (
+      databaseName,
+      schemaName,
+      tableName,
+      indexName,
+      indexType,
+      statsLastTaken,
+      rowCnt,
+      rowmodctr,
+      sqlString
+    )
+    SELECT ' +
+      CHAR(39) + @databaseName + CHAR(39) + ',
+      sys_schemas.name AS schemaName,
+      sys_tables.name AS tableName,
+      sys_indexes.name AS indexName,
+      sys_indexes.[type_desc] AS indexType,
+      STATS_DATE(sys_indexes.[object_id],sys_indexes.index_id) AS statsLastTaken,
+      sys_sysIndexes.rowcnt,
+      sys_sysIndexes.rowmodctr,
+      CASE
+        WHEN sys_sysIndexes.rowcnt < 500000
+        THEN ''100 PERCENT''
+        WHEN sys_sysIndexes.rowcnt < 1000000
+        THEN ''50 PERCENT''
+        WHEN sys_sysIndexes.rowcnt < 5000000
+        THEN ''25 PERCENT''
+        WHEN sys_sysIndexes.rowcnt < 10000000
+        THEN ''10 PERCENT''
+        WHEN sys_sysIndexes.rowcnt < 50000000
+        THEN ''2 PERCENT''
+        WHEN sys_sysIndexes.rowcnt < 100000000
+        THEN ''1 PERCENT''
+        ELSE ''3000000 ROWS ''
+      END
+    FROM sys.indexes AS sys_indexes
+    INNER JOIN sys.sysindexes AS sys_sysIndexes 
+      ON sys_indexes.[object_id] = sys_sysIndexes.id
+        AND sys_indexes.name = sys_sysIndexes.name
+    INNER JOIN sys.tables AS sys_tables 
+      ON sys_tables.[object_id] = sys_indexes.[object_id]
+    INNER JOIN sys.schemas AS sys_schemas 
+      ON sys_schemas.[schema_id] = sys_tables.[schema_id]
+    WHERE sys_tables.is_ms_shipped = 0  --user indexes only
+      AND sys_indexes.index_id != 0     --ignore heaps
+      AND sys_sysIndexes.rowcnt > 1000  --only indexes with more than 1000 rows
+      AND sys_sysIndexes.rowmodctr > 0  --indexes with some changed data'
+
+    EXEC master.dbo.sp_executeSQL @sql
+   PRINT @sql
+    UPDATE #databaseName
+      SET processed = 1
+    WHERE databaseName = @databaseName
+  END
+
+  SELECT * FROM #indexUsage
+--loop over table to perform updates
+WHILE EXISTS(SELECT 1 FROM #indexUsage WHERE [status] IS NULL)
+
+  BEGIN
+    SELECT TOP 1
+     @sql = 'UPDATE STATISTICS [' + databaseName + '].[' + schemaName + '].[' + tableName + '] [' + indexName + '] WITH SAMPLE ' + sqlString,
+     @id = id,   
+     @startTime = GETDATE()
+    FROM #indexUsage
+    WHERE [status] IS NULL
+
+    --record the start time and indicate the process is running
+    BEGIN TRY
+      UPDATE #indexUsage
+      SET
+        startDate = @startTime,
+        [status] = 'Running'
+      WHERE id = @id
+    END TRY
+    BEGIN CATCH 
+      UPDATE #indexUsage
+      SET
+        [status] = 'Error: ' + ERROR_MESSAGE(),
+        endDate = GETDATE(),
+        elapsedTime = CONVERT(VARCHAR,DATEADD(MILLISECOND,DATEDIFF(MILLISECOND,@startTime,GETDATE()),0),114)
+      WHERE id = @id
+    END CATCH
+
+    --run the statistics update
+    BEGIN TRY
+      RAISERROR(@sql,0,1)WITH NOWAIT  --debugging
+      EXEC (@sql)
+    END TRY
+    BEGIN CATCH
+      UPDATE #indexUsage
+      SET
+        [status] = 'Error: ' + ERROR_MESSAGE(),
+        endDate = GETDATE(),
+        elapsedTime = CONVERT(VARCHAR,DATEADD(MILLISECOND,DATEDIFF(MILLISECOND,@startTime,GETDATE()),0),114)
+      WHERE id = @id
+    END CATCH
+
+    IF EXISTS(SELECT 1 FROM #indexUsage WHERE id = @id AND [status] NOT LIKE 'Error%')  
+      BEGIN
+        UPDATE #indexUsage
+        SET 
+          [status] = 'Complete',
+          endDate = GETDATE(),
+          elapsedTime = CONVERT(VARCHAR,DATEADD(MILLISECOND,DATEDIFF(MILLISECOND,@startTime,GETDATE()),0),114)
+        WHERE id = @id
+      END
+
+    --SET @counter += 1
+  END
