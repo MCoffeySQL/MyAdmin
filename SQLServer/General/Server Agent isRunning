@@ -1,0 +1,3 @@
+
+--To validate sql server agent is running:
+xp_servicecontrol 'querystate', 'SQLSERVERAGENT'
