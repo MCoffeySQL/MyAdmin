@@ -1,0 +1,18 @@
+--Start up time is kept in the system dynamic management views
+SELECT 
+  sqlServer_start_time
+FROM sys.dm_os_sys_info
+
+
+--tempdb is always recreated when SQL Server Starts
+SELECT
+  create_date
+FROM sys.databases
+WHERE name = 'tempdb'
+
+--Any spid < 51 will contain the start up time .
+--This can be verified by using EXEC sp_who2 
+SELECT 
+   MIN(login_time)
+  ,MIN(last_batch)
+FROM sys.sysProcesses
