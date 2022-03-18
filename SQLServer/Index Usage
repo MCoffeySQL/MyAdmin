@@ -1,0 +1,54 @@
+SET NOCOUNT ON
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+
+DECLARE 
+  @return INT = 50
+
+SELECT TOP (@return)
+  DB_NAME(indexUsageStats.database_id) AS databaseName,
+  SCHEMA_NAME(objects.[schema_id]) AS schemaName,
+  OBJECT_NAME(indexUsageStats.[object_id]) AS tableName,
+  indexes.name AS indexName,
+  CASE
+    WHEN indexes.[type] = 0 THEN 'Heap'
+    WHEN indexes.[type] = 1 THEN 'Clustered'
+    WHEN indexes.[type] = 2 THEN 'Nonclustered'
+    WHEN indexes.[type] = 3 THEN 'XML'
+    WHEN indexes.[type] = 4 THEN 'Spatial'
+    WHEN indexes.[type] = 5 THEN 'Clustered Columnstore' --Applies to SQL Server 2014 through SQL Server 2016
+    WHEN indexes.[type] = 6 THEN 'Nonclustered Columnstore' --Applies to SQL Server 2012 through SQL Server 2016
+    WHEN indexes.[type] = 7 THEN 'Nonclustered Hash'  --Applies to SQL Server 2014 through SQL Server 2016
+    ELSE NULL
+  END AS indexType,
+  CASE
+    WHEN indexes.is_primary_key = 1
+    THEN 'Yes'
+    ELSE 'No'
+  END AS isPrimaryKey,
+  CASE	
+    WHEN indexes.is_unique = 1
+    THEN 'Yes'
+    ELSE 'No'
+  END AS isUnique,
+  CASE
+    WHEN indexes.has_filter = 1
+    THEN 'Yes'
+    ELSE 'No'
+  END AS hasFilter,
+  indexUsageStats.user_seeks AS userSeeks,
+  indexUsageStats.user_scans AS userScans,
+  indexUsageStats.user_lookups AS userLookups,
+  indexUsageStats.user_seeks + indexUsageStats.user_scans + indexUsageStats.user_lookups AS indexUsage,
+  indexUsageStats.user_updates AS userUpdates,
+  indexes.fill_factor AS indexFillFactor
+FROM sys.dm_db_index_usage_stats AS indexUsageStats
+INNER JOIN sys.indexes
+  ON indexUsageStats.index_id = indexes.index_id
+    AND indexUsageStats.[object_id] = indexes.[object_id]
+INNER JOIN sys.objects
+  ON indexes.[object_id] = objects.[object_id]
+WHERE
+  indexUsageStats.database_id = DB_ID()
+    AND indexes.name IS NOT NULL
+    AND OBJECTPROPERTY(indexUsageStats.[object_id], 'isMSShipped') = 0
+ORDER BY indexUsage DESC
