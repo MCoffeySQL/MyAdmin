@@ -1,0 +1,10 @@
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+SET NOCOUNT ON
+
+SELECT
+  SUM(user_object_reserved_page_count) * 8.0 / 1024.0 AS [User Objects (MB)],
+  SUM(internal_object_reserved_page_count) * 8.0 / 1024.0 AS [Internal Objects (MB)],
+  SUM(version_store_reserved_page_count) * 8.0 / 1024.0 AS [Version Store (MB)],
+  SUM(mixed_extent_page_count) * 8.0 / 1024.0 AS [Mixed Extent (MB)],
+  SUM(unallocated_extent_page_count) * 8.0 / 1024.0 AS [Unallocated (MB)]
+FROM sys.dm_db_file_space_usage;
