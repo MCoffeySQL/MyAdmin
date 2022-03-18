@@ -1,0 +1,17 @@
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+SET NOCOUNT ON
+
+SELECT 
+  GETDATE() AS dateSampled,
+  ROUND(missingIndexGroupStats.avg_total_user_cost * missingIndexGroupStats.avg_user_impact
+    * (missingIndexGroupStats.user_seeks + missingIndexGroupStats.user_scans),0)
+    AS totalCost,
+  missingIndexDetails.[statement] AS tableName,
+  missingIndexDetails.equality_columns,
+  missingIndexDetails.inequality_columns,
+  missingIndexDetails.included_columns
+FROM sys.dm_db_missing_index_groups AS missingIndexGroups
+INNER JOIN sys.dm_db_missing_index_group_stats AS missingIndexGroupStats
+  ON missingIndexGroupStats.group_handle = missingIndexGroups.index_group_handle
+INNER JOIN sys.dm_db_missing_index_details AS missingIndexDetails
+  ON missingIndexGroups.index_handle = missingIndexDetails.index_handle
