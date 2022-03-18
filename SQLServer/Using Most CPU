@@ -1,0 +1,26 @@
+SET NOCOUNT ON
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+
+DECLARE 
+  @returnRows INT = 50
+
+SELECT TOP (@returnRows)
+  CAST((queryStats.total_worker_time) / 1000000.0 AS DECIMAL(28,2)) AS cpuTimeTotal_seconds,
+  CAST(queryStats.total_worker_time * 100.0 / queryStats.total_elapsed_time AS DECIMAL(28,2)) AS cpuPercent,
+  CAST((queryStats.total_elapsed_time - queryStats.total_worker_time)* 100.0 / queryStats.total_elapsed_time AS DECIMAL(28, 2)) AS waitingPercent,
+  queryStats.execution_count AS executionCount,
+  CAST((queryStats.total_worker_time) / 1000000.0 / queryStats.execution_count AS DECIMAL(28, 2)) AS cpuTimeAverage_seconds,
+  SUBSTRING (sqlText.[text],(queryStats.statement_start_offset/2) + 1,
+  ((CASE 
+      WHEN queryStats.statement_end_offset = -1
+      THEN LEN(CONVERT(NVARCHAR(MAX), sqlText.[text])) * 2
+      ELSE queryStats.statement_end_offset
+  END - queryStats.statement_start_offset)/2) + 1) AS query,
+  sqlText.[text] AS parentQuery,
+  DB_NAME(sqlText.[dbid]) AS DatabaseName,
+  queryPlan.query_plan
+FROM sys.dm_exec_query_stats AS queryStats
+CROSS APPLY sys.dm_exec_sql_text(queryStats.[sql_handle]) AS sqlText
+CROSS APPLY sys.dm_exec_query_plan(queryStats.plan_handle) AS queryPlan
+WHERE queryStats.total_elapsed_time > 0
+ORDER BY cpuTimeTotal_seconds DESC
