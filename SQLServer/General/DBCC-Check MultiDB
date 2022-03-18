@@ -1,0 +1,98 @@
+USE [utility]
+GO
+
+/****** Object:  StoredProcedure [dbo].[db_databaseCheck]    Script Date: 5/3/2017 1:30:43 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+CREATE PROCEDURE [dbo].[db_databaseCheck]
+AS
+
+SET NOCOUNT ON
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+
+IF OBJECT_ID('tempdb..#databaseCheck','U') IS NOT NULL  
+  DROP TABLE #databaseCheck
+
+DECLARE
+  @sql NVARCHAR(4000),
+  @id TINYINT,
+  @databaseName VARCHAR(60),
+  @message NVARCHAR(256),
+  @timeStart DATETIME,
+  @timeEnd DATETIME,
+  @timeElapsedMS BIGINT,
+  @timeElapsed VARCHAR(20)
+
+CREATE TABLE #databaseCheck(
+  id INT IDENTITY(1,1) NOT NULL,
+  databaseName VARCHAR(60) NOT NULL,
+  processed TINYINT DEFAULT 0,
+  sqlStatement NVARCHAR(256),
+  errorMessage VARCHAR(MAX),
+  processMessage VARCHAR(MAX)
+)
+
+INSERT INTO #databaseCheck(
+  databaseName,
+  sqlStatement
+)
+SELECT 
+  '[' + [name] + ']',
+  'DBCC CHECKDB ([' + [name] + ']) WITH TABLERESULTS'
+FROM sys.databases
+WHERE state_desc = 'ONLINE'
+  AND [name] NOT IN ('master','model','msdb','tempdb')
+
+WHILE EXISTS (SELECT 1 FROM #databaseCheck WHERE processed = 0)
+  BEGIN
+    SELECT TOP 1
+      @id = id,
+      @databaseName = databaseName,
+      @sql = sqlStatement
+    FROM #databaseCheck
+    WHERE processed = 0
+
+    SET @message = 'Checking DB ' + @databaseName
+    RAISERROR(@message,0,1)WITH NOWAIT
+
+    SET @timeStart = GETDATE()
+
+    INSERT INTO utility.dbo.databaseCheck_history(
+      error,
+      errorLevel,
+      errorState,
+      errorMessageText,
+      repairLevel,
+      [status],
+      [dbID],
+      objectID,
+      indexID,
+      paritionID,
+      allocUnitID,
+      [file],
+      [page],
+      slot,
+      refFile,
+      refPage,
+      refSlot,
+      allocation
+    )
+    EXEC sp_executeSQL @sql
+
+    SET @timeEnd = GETDATE()
+    SELECT @timeElapsed = CONVERT(VARCHAR,DATEADD(MILLISECOND,DATEDIFF(MILLISECOND,@timeStart,@timeEnd),0),114)
+
+    UPDATE #databaseCheck
+    SET
+      processed = 1
+    WHERE id = @id
+
+  END
+
+GO
