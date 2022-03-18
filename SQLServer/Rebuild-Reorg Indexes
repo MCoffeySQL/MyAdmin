@@ -1,0 +1,114 @@
+--Intelligently Rebuild/Reorg Indexes
+--Determining the degree of fragmentation can take a long time
+--Please be aware the DMV used to obtain the fragmentation details (sys.dm_db_
+--index_physical_stats) can take a long time to run. You should balance this time
+--against the time it would take just to rebuild or organize the indexes without
+--inspecting them for their degree of fragmentation. On an Enterprise-level system
+--with 600 indexes, some containing billions of rows, querying the DMV can take
+--several hours to complete.
+
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+SET NOCOUNT ON
+
+IF OBJECT_ID('tempdb..#indexFragmentation')IS NOT NULL
+  DROP TABLE #indexFragmentation
+
+DECLARE   
+  --@counter SMALLINT = 0, --debugging
+  --@maxCounter SMALLINT = 5, --debugging
+  @id INT,
+  @sql NVARCHAR(MAX),
+  @status VARCHAR(255),
+  @startTime DATETIME
+
+
+SELECT
+  id = IDENTITY(INT,1,1),
+  DB_NAME(DB_ID()) AS databaseName,
+  sys_schemas.name AS schemaName,
+  OBJECT_NAME(db_indexPhysicalStats.[object_id]) AS tableName,
+  sys_indexes.name AS indexName,
+  CAST(db_indexPhysicalStats.avg_fragmentation_in_percent AS NUMERIC(6,3)) AS [fragmentation%],
+  CASE
+    WHEN db_indexPhysicalStats.avg_fragmentation_in_percent > 30
+    THEN 'ALTER INDEX [' + sys_indexes.name + '] ON [' + sys_schemas.name + '].[' + OBJECT_NAME(db_indexPhysicalStats.[object_id]) + '] REBUILD'
+    WHEN db_indexPhysicalStats.avg_fragmentation_in_percent > 10 AND db_indexPhysicalStats.avg_fragmentation_in_percent <= 30
+    THEN 'ALTER INDEX [' + sys_indexes.name + '] ON [' + sys_schemas.name + '].[' + OBJECT_NAME(db_indexPhysicalStats.[object_id]) + '] REORGANIZE'
+    ELSE 'NONE'
+  END AS recommendation,
+  dateStart = CAST(NULL AS DATETIME),
+  dateEnd = CAST(NULL AS DATETIME),
+  elapsedTime = CAST(NULL AS CHAR(12)),
+  [status] = CAST(NULL AS VARCHAR(255))
+INTO #indexFragmentation
+FROM sys.dm_db_index_physical_stats(DB_ID(),NULL, NULL, NULL, 'SAMPLED') AS db_indexPhysicalStats
+INNER JOIN sys.indexes AS sys_indexes 
+  ON db_indexPhysicalStats.[object_id] = sys_indexes.[object_id]
+  AND db_indexPhysicalStats.index_id = sys_indexes.index_id
+INNER JOIN sys.objects AS sys_objects
+  ON db_indexPhysicalStats.[object_id] = sys_objects.[object_id]
+INNER JOIN sys.schemas AS sys_schemas 
+  ON sys_schemas.[schema_id] = sys_objects.[schema_id]
+WHERE db_indexPhysicalStats.database_id = DB_ID()
+  AND sys_indexes.index_id != 0
+  AND db_indexPhysicalStats.record_count > 0
+  AND sys_objects.is_ms_shipped = 0
+  AND db_indexPhysicalStats.avg_fragmentation_in_percent > 10
+
+--loop through indexFragmentation to perform updates
+WHILE EXISTS(SELECT 1 FROM #indexFragmentation WHERE [status] IS NULL)
+  --AND @counter <= @maxCounter  --debugging
+  BEGIN
+    SELECT TOP 1
+      @id = id,
+      @sql = recommendation,
+      @startTime = GETDATE()
+    FROM #indexFragmentation
+    WHERE [status] IS NULL
+
+     --record the start time and indicate the process is running
+    BEGIN TRY
+      UPDATE #indexFragmentation
+      SET
+        dateStart = @startTime,
+        [status] = 'Running'
+      WHERE id = @id
+    END TRY
+    BEGIN CATCH 
+      UPDATE #indexFragmentation
+      SET
+        [status] = 'Error: ' + ERROR_MESSAGE(),
+        dateEnd = GETDATE(),
+        elapsedTime = CONVERT(VARCHAR,DATEADD(MILLISECOND,DATEDIFF(MILLISECOND,@startTime,GETDATE()),0),114)
+      WHERE id = @id
+    END CATCH
+
+    --run the statistics update
+    BEGIN TRY
+      RAISERROR(@sql,0,1)WITH NOWAIT  --debugging
+      EXEC (@sql)
+    END TRY
+    BEGIN CATCH
+      UPDATE #indexFragmentation
+      SET
+        [status] = 'Error: ' + ERROR_MESSAGE(),
+        dateEnd = GETDATE(),
+        elapsedTime = CONVERT(VARCHAR,DATEADD(MILLISECOND,DATEDIFF(MILLISECOND,@startTime,GETDATE()),0),114)
+      WHERE id = @id
+    END CATCH
+
+    IF EXISTS(SELECT 1 FROM #indexFragmentation WHERE id = @id AND [status] NOT LIKE 'Error%')  
+      BEGIN
+        UPDATE #indexFragmentation
+        SET 
+          [status] = 'Complete',
+          dateEnd = GETDATE(),
+          elapsedTime = CONVERT(VARCHAR,DATEADD(MILLISECOND,DATEDIFF(MILLISECOND,@startTime,GETDATE()),0),114)
+        WHERE id = @id
+      END
+
+      --SET @counter += 1  --debugging
+  END
+
+SELECT *
+FROM #indexFragmentation
