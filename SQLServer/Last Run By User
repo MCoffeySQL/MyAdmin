@@ -1,0 +1,17 @@
+--find everyone's last run query
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+SET NOCOUNT ON
+
+SELECT 
+  dm_execConnections.session_id, 
+  dm_execSessions.[host_name], 
+  dm_execSessions.login_name, 
+  dm_execSessions.[status],
+  dm_execSQLtext.[text], 
+  dm_execSessions.login_time, 
+  dm_execSessions.[program_name]
+FROM sys.dm_exec_connections AS dm_execConnections
+INNER JOIN sys.dm_exec_sessions AS dm_execSessions 
+  ON dm_execConnections.session_id = dm_execSessions.session_id
+CROSS APPLY sys.dm_exec_sql_text(most_recent_sql_handle) AS dm_execSQLtext
+ORDER BY dm_execConnections.session_id
