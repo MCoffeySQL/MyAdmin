@@ -1,0 +1,29 @@
+--Convert Millisecond To "hh:mm:ss" Format 
+--You have a column in your table that stores duration in milliseconds
+--You would like to output this in the following format ‘hh:mm:ss’
+--So for example 11354013 would be 03:09:14:013 and 86399998 milliseconds would be 23:59:59:997 But be careful because 86399998 will return 23:59:59:997 but 86399999 will return 00:00:00:000 (it will round up to 1 day, 0 hours etc etc)
+
+--So let’s see how to do that. Basically all you have to do is add the milliseconds to a zero date and then convert that to varchar with a style of 114 (hh:mi:ss:mmm(24h))
+
+DECLARE @SomeMilliSecondsNumber INT
+SELECT @SomeMilliSecondsNumber =11354013
+
+SELECT CONVERT(VARCHAR,DATEADD(ms,@SomeMilliSecondsNumber,0),114)
+--03:09:14:013
+GO
+
+--closest to midnight is .997
+DECLARE @SomeMilliSecondsNumber INT
+SELECT @SomeMilliSecondsNumber = 86399998
+
+SELECT CONVERT(VARCHAR,DATEADD(ms,@SomeMilliSecondsNumber,0),114)
+--23:59:59:997
+GO
+
+--is midnight
+DECLARE @SomeMilliSecondsNumber INT
+SELECT @SomeMilliSecondsNumber = 86399999
+
+SELECT CONVERT(VARCHAR,DATEADD(ms,@SomeMilliSecondsNumber,0),114)
+--00:00:00:000
+GO
