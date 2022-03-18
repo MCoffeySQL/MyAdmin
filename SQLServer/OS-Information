@@ -1,0 +1,11 @@
+--System information from SQL Server OS
+
+--ms_ticks - Number of milliseconds since the computer was started
+--cpu_count - Number of logical CPUs on the computer
+--physical_memory_in_bytes - Amount of physical memory available
+--virtual_memory_in_bytes - Amount of virtual memory available
+--sqlserver_start_time_ms_ticks - Number of milliseconds since SQL Server was last restarted (in 2008 and higher)
+--sqlserver_start_time - Date and time SQL Server was last started (in 2008 and higher)
+
+SELECT *
+FROM sys.dm_os_sys_info
