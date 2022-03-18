@@ -1,0 +1,48 @@
+
+
+SELECT
+  [sysProcesses].spid,
+  [sysProcesses].lastWaitType,
+  [sysProcesses].waitTime/1000.0 AS waitTime_seconds,
+  DB_NAME([sysProcesses].[dbid]) AS databaseName,
+  [sysProcesses].loginame,
+  [sysProcesses].hostName,
+  [sysProcesses].cpu,
+  [sysProcesses].physical_IO AS physicalIO,
+  ((([sysProcesses].memUsage * 8.0) / 1024.0) / 1024.0) AS memoryUsage_megabytes,
+  [sysProcesses].login_time,
+  CONVERT(VARCHAR,DATEADD(MILLISECOND,DATEDIFF(MILLISECOND,[sysProcesses].login_time,GETDATE()),0),114) AS timeConnected,
+  [sysProcesses].last_batch,
+  [sysProcesses].[status],
+  [sysProcesses].cmd,
+  [sysProcesses].[sql_handle],
+  execSessions.is_user_process AS isUserProcess,
+  execSessions.group_id AS workGroupID,
+  execSessions.reads,
+  execSessions.logical_reads AS logicalReads,
+  execSessions.writes,
+  CASE execSessions.transaction_isolation_level
+    WHEN 0
+    THEN 'Unspecified'
+    WHEN 1
+    THEN 'Read Uncommited'
+    WHEN 2
+    THEN 'Read Commited'
+    WHEN 3
+    THEN 'Repeatable'
+    WHEN 4
+    THEN 'Serializable'
+    WHEN 5
+    THEN 'Snapshot'
+  END AS transactionIsolation,
+  execConnections.net_transport AS networkTransport,
+  execConnections.protocol_type AS sessionProtocol,
+  execConnections.auth_scheme AS sessionAuthentication,
+  sqlText.[text] AS sqlText
+FROM sys.sysprocesses AS [sysProcesses]
+JOIN sys.dm_exec_sessions AS execSessions
+  ON [sysProcesses].spid = execSessions.session_id
+LEFT JOIN sys.dm_exec_connections AS execConnections
+  ON [sysProcesses].spid = execConnections.session_id
+    AND execConnections.parent_connection_id IS NULL
+OUTER APPLY sys.dm_exec_sql_text([sysProcesses].[sql_handle]) AS sqlText
