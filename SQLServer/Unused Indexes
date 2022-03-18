@@ -1,0 +1,33 @@
+SET NOCOUNT ON
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+
+SELECT
+  DB_NAME() AS databaseName,
+  SCHEMA_NAME(objects.[schema_id]) AS schemaName,
+  OBJECT_NAME(indexes.[object_id]) AS tableName,
+  indexes.name AS indexName,
+  CASE
+    WHEN indexes.[type] = 0 THEN 'Heap'
+    WHEN indexes.[type] = 1 THEN 'Clustered'
+    WHEN indexes.[type] = 2 THEN 'Nonclustered'
+    WHEN indexes.[type] = 3 THEN 'XML'
+    WHEN indexes.[type] = 4 THEN 'Spatial'
+    WHEN indexes.[type] = 5 THEN 'Clustered Columnstore' --Applies to SQL Server 2014 through SQL Server 2016
+    WHEN indexes.[type] = 6 THEN 'Nonclustered Columnstore' --Applies to SQL Server 2012 through SQL Server 2016
+    WHEN indexes.[type] = 7 THEN 'Nonclustered Hash'  --Applies to SQL Server 2014 through SQL Server 2016
+    ELSE NULL
+  END AS indexType,
+  indexes.is_primary_key AS isPrimaryKey,
+  indexes.is_unique AS isUnique,
+  CAST(GETDATE() AS DATE) AS dateCollected,
+  GETDATE() AS dateCollectedModified
+FROM sys.indexes
+INNER JOIN sys.objects
+  ON indexes.[object_id] = objects.[object_id]
+LEFT OUTER JOIN sys.dm_db_index_usage_stats AS indexUsageStats
+  ON indexUsageStats.[object_id] = indexes.[object_id]
+    AND indexUsageStats.[index_id] = indexes.[index_id]
+    AND indexUsageStats.database_id = DB_ID()
+WHERE OBJECTPROPERTY(objects.[object_id], 'isMSShipped') = 0
+  AND indexes.name IS NOT NULL
+  AND indexUsageStats.[object_id] IS NULL
