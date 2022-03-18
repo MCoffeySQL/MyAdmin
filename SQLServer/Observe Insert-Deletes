@@ -1,0 +1,145 @@
+--Determining how many rows are inserted/deleted/updated/selected
+--uses isolated snapshots of the DMVs
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+SET NOCOUNT ON 
+
+IF OBJECT_ID('tempdb..#preWorkIndexCount')IS NOT NULL
+  DROP TABLE #preWorkIndexCount
+
+IF OBJECT_ID('tempdb..#preWorkIndexCount')IS NOT NULL
+  DROP TABLE #preWorkIndexCount
+  
+IF OBJECT_ID('tempdb..#preWorkQuerySnapShot')IS NOT NULL
+  DROP TABLE #preWorkQuerySnapShot
+
+IF OBJECT_ID('tempdb..#postWorkQuerySnapShot')IS NOT NULL
+  DROP TABLE #postWorkQuerySnapShot
+ 
+--get prework index counters
+SELECT
+  [sql_handle], 
+  plan_handle, 
+  total_elapsed_time,
+  total_worker_time,
+  total_logical_reads, 
+  total_logical_writes, 
+  total_clr_time,
+  execution_count, 
+  statement_start_offset, 
+  statement_end_offset
+INTO #preWorkQuerySnapShot
+FROM sys.dm_exec_query_stats
+
+SELECT 
+  sys_schemas.name AS SchemaName,
+  OBJECT_NAME (db_indexOperationalStats.[object_id]) AS TableName,
+  sys_indexes.name AS IndexName,
+  db_indexOperationalStats.leaf_delete_count,
+  db_indexOperationalStats.leaf_ghost_count,
+  db_indexOperationalStats.leaf_insert_count,
+  db_indexOperationalStats.leaf_update_count,
+  db_indexOperationalStats.range_scan_count,
+  db_indexOperationalStats.singleton_lookup_count
+INTO #preWorkIndexCount
+FROM sys.dm_db_index_operational_stats(DB_ID(), NULL, NULL, NULL) AS db_indexOperationalStats
+INNER JOIN sys.objects AS sys_objects
+  ON db_indexOperationalStats.[object_id] = sys_objects.[object_id]
+INNER JOIN sys.indexes AS sys_indexes
+  ON db_indexOperationalStats.index_id = sys_indexes.index_id
+  AND sys_indexes.[object_id] = sys_objects.[object_id]
+INNER JOIN sys.schemas AS sys_schemas
+  ON sys_schemas.[schema_id] = sys_objects.[schema_id]
+WHERE sys_objects.is_ms_shipped = 0
+
+WAITFOR DELAY '00:05:00'
+
+--get postwork index counters
+SELECT
+  [sql_handle], 
+  plan_handle, 
+  total_elapsed_time,
+  total_worker_time,
+  total_logical_reads, 
+  total_logical_writes, 
+  total_clr_time,
+  execution_count, 
+  statement_start_offset, 
+  statement_end_offset
+INTO #postWorkQuerySnapShot
+FROM sys.dm_exec_query_stats
+
+SELECT 
+  sys_schemas.name AS schemaName,
+  OBJECT_NAME (db_indexOperationalStats.[object_id]) AS tableName,
+  sys_indexes.name AS indexName,
+  db_indexOperationalStats.leaf_delete_count,
+  db_indexOperationalStats.leaf_ghost_count,
+  db_indexOperationalStats.leaf_insert_count,
+  db_indexOperationalStats.leaf_update_count,
+  db_indexOperationalStats.range_scan_count,
+  db_indexOperationalStats.singleton_lookup_count
+INTO #postWorkIndexCount
+FROM sys.dm_db_index_operational_stats(DB_ID(), NULL, NULL, NULL) AS db_indexOperationalStats
+INNER JOIN sys.objects AS sys_objects 
+  ON db_indexOperationalStats.object_id = sys_objects.object_id
+INNER JOIN sys.indexes AS sys_indexes 
+  ON db_indexOperationalStats.index_id = sys_indexes.index_id
+AND sys_indexes.object_id = sys_objects.object_id
+INNER JOIN sys.schemas AS sys_schemas 
+  ON sys_schemas.schema_id = sys_objects.schema_id
+WHERE sys_objects.is_ms_shipped = 0
+
+--calculate index deltas
+SELECT
+  postWorkIndexCount.SchemaName,
+  postWorkIndexCount.TableName,
+  postWorkIndexCount.IndexName,
+  postWorkIndexCount.leaf_delete_count - ISNULL(preWorkIndexCount.leaf_delete_count, 0) AS leaf_delete_countDelta,
+  postWorkIndexCount.leaf_ghost_count - ISNULL(preWorkIndexCount.leaf_ghost_count, 0) AS leaf_ghost_countDelta,
+  postWorkIndexCount.leaf_insert_count - ISNULL(preWorkIndexCount.leaf_insert_count, 0) AS leaf_insert_countDelta,
+  postWorkIndexCount.leaf_update_count - ISNULL(preWorkIndexCount.leaf_update_count, 0) AS leaf_update_countDelta,
+  postWorkIndexCount.range_scan_count - ISNULL(preWorkIndexCount.range_scan_count, 0) AS range_scan_countDelta,
+  postWorkIndexCount.singleton_lookup_count - ISNULL(preWorkIndexCount.singleton_lookup_count, 0) AS singleton_lookup_countDelta
+FROM #preWorkIndexCount AS preWorkIndexCount
+RIGHT OUTER JOIN #postWorkIndexCount AS postWorkIndexCount
+  ON postWorkIndexCount.SchemaName = ISNULL(preWorkIndexCount.SchemaName, postWorkIndexCount.SchemaName)
+    AND postWorkIndexCount.TableName = ISNULL(preWorkIndexCount.TableName, postWorkIndexCount.TableName)
+    AND postWorkIndexCount.IndexName = ISNULL(preWorkIndexCount.IndexName, postWorkIndexCount.IndexName)
+WHERE postWorkIndexCount.leaf_delete_count - ISNULL(preWorkIndexCount.leaf_delete_count, 0) > 0
+  OR postWorkIndexCount.leaf_ghost_count - ISNULL(preWorkIndexCount.leaf_ghost_count, 0) > 0
+  OR postWorkIndexCount.leaf_insert_count - ISNULL(preWorkIndexCount.leaf_insert_count, 0) > 0
+  OR postWorkIndexCount.leaf_update_count - ISNULL(preWorkIndexCount.leaf_update_count, 0) > 0
+  OR postWorkIndexCount.range_scan_count - ISNULL(preWorkIndexCount.range_scan_count, 0) > 0
+  OR postWorkIndexCount.singleton_lookup_count - ISNULL(preWorkIndexCount.singleton_lookup_count, 0) > 0
+ORDER BY leaf_delete_countDelta DESC
+
+SELECT
+  postWorkQuerySnapShot.total_elapsed_time - ISNULL(preWorkQuerySnapShot.total_elapsed_time, 0) AS [duration],
+  postWorkQuerySnapShot.total_worker_time - ISNULL(preWorkQuerySnapShot.total_worker_time, 0) AS [Time on CPU],
+  (postWorkQuerySnapShot.total_elapsed_time - ISNULL(preWorkQuerySnapShot.total_elapsed_time, 0)) -   (postWorkQuerySnapShot.total_worker_time - ISNULL(preWorkQuerySnapShot.total_worker_time, 0)) AS [Time blocked],
+  postWorkQuerySnapShot.total_logical_reads - ISNULL(preWorkQuerySnapShot.total_logical_reads, 0) AS [Reads],
+  postWorkQuerySnapShot.total_logical_writes - ISNULL(preWorkQuerySnapShot.total_logical_writes, 0) AS [Writes],
+  postWorkQuerySnapShot.total_clr_time - ISNULL(preWorkQuerySnapShot.total_clr_time, 0) AS [CLR time],
+  postWorkQuerySnapShot.execution_count - ISNULL(preWorkQuerySnapShot.execution_count, 0) AS [Executions],
+  SUBSTRING (dm_sqlText.[text],postWorkQuerySnapShot.statement_start_offset/2 + 1,
+  ((CASE 
+      WHEN postWorkQuerySnapShot.statement_end_offset = -1
+      THEN LEN(CONVERT(NVARCHAR(MAX), dm_sqlText.[text])) * 2
+      ELSE postWorkQuerySnapShot.statement_end_offset
+   END - postWorkQuerySnapShot.statement_start_offset)/2) + 1) AS [Individual Query],
+  dm_sqlText.[text] AS [Parent Query],
+  DB_NAME(dm_sqlText.[dbid]) AS DatabaseName
+FROM #preWorkQuerySnapShot AS preWorkQuerySnapShot
+RIGHT OUTER JOIN #postWorkQuerySnapShot AS postWorkQuerySnapShot 
+ ON postWorkQuerySnapShot.[sql_handle] = ISNULL(preWorkQuerySnapShot.[sql_handle], postWorkQuerySnapShot.[sql_handle])
+AND postWorkQuerySnapShot.plan_handle = ISNULL(preWorkQuerySnapShot.plan_handle, postWorkQuerySnapShot.plan_handle)
+AND postWorkQuerySnapShot.statement_start_offset = ISNULL(preWorkQuerySnapShot.statement_start_offset, postWorkQuerySnapShot.statement_start_offset)
+AND postWorkQuerySnapShot.statement_end_offset = ISNULL(preWorkQuerySnapShot.statement_end_offset, postWorkQuerySnapShot.statement_end_offset)
+CROSS APPLY sys.dm_exec_sql_text(postWorkQuerySnapShot.[sql_handle]) AS dm_sqlText
+WHERE postWorkQuerySnapShot.execution_count != ISNULL(preWorkQuerySnapShot.execution_count, 0)
+ORDER BY [Duration] DESC
+
+DROP TABLE #preWorkIndexCount
+DROP TABLE #postWorkIndexCount
+DROP TABLE #preWorkQuerySnapShot
+DROP TABLE #postWorkQuerySnapShot
