@@ -1,0 +1,6 @@
+SELECT 
+  name,
+  LOWER(type_desc),
+  OBJECT_DEFINITION([object_id]) AS objectDefinition
+FROM sys.all_objects
+WHERE OBJECT_DEFINITION([object_id]) LIKE '%sp_password%'
