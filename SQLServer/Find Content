@@ -1,0 +1,180 @@
+--Loop though every "text" column in the database to determine if it contains the string to be found.
+--2nd Part the search string is found count the number of occurrences
+
+USE [database]
+GO
+
+SET NOCOUNT ON
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+
+DECLARE 
+  @id INT,
+  @databaseName NVARCHAR(255),
+  @schemaName NVARCHAR(255),
+  @tableName NVARCHAR(255),
+  @columnName NVARCHAR(255),
+  @columnType NVARCHAR(60),
+  @searchTerm NVARCHAR(255) = 'M25.511',
+  @searchType NVARCHAR(255) = 'equal', -- or 'Like' --this could be leading like or trailing like as well
+  @sql NVARCHAR(4000),
+  @message NVARCHAR(300),
+  @isFound TINYINT
+
+IF OBJECT_ID('tempdb..#findContent','U')IS NOT NULL
+  DROP TABLE #findContent
+
+CREATE TABLE #findContent (
+  id INT IDENTITY(1,1) NOT NULL, 
+  databaseName NVARCHAR(255) NOT NULL,
+  schemaName NVARCHAR(255) NOT NULL,
+  tableName NVARCHAR(255) NOT NULL,
+  columnName NVARCHAR(255) NOT NULL,
+  columnType VARCHAR(60) NOT NULL,
+  processed BIT DEFAULT 0,
+  found BIT DEFAULT 0,
+  occurrences INT DEFAULT 0
+)
+
+INSERT INTO #findContent(
+  databaseName,
+  schemaName,
+  tableName,
+  columnName,
+  columnType
+)
+SELECT 
+  DB_NAME() AS databaseName,
+  SCHEMA_NAME(tables.[schema_id]) AS schemaName,
+  OBJECT_NAME(columns.[object_id]) AS tableName,
+  columns.[name] AS columnName,
+  types.[name] AS columnType
+FROM sys.columns
+JOIN sys.tables 
+  ON columns.[object_id] = tables.[object_id]
+JOIN sys.types 
+  ON columns.system_type_id = types.system_type_id
+WHERE types.[name] IN ('text','ntext','varchar','nvarchar','char','nchar')
+  AND tables.[type] = 'U'
+  AND tables.is_ms_shipped = 0
+
+WHILE EXISTS(SELECT 1 FROM #findContent WHERE processed = 0)
+  BEGIN
+    SELECT TOP 1 
+      @id = id,
+      @databaseName = databaseName,
+      @schemaName = schemaName,
+      @tableName = tableName,
+      @columnName = columnName,
+      @columnType = columnType
+    FROM #findContent
+    WHERE processed = 0
+
+    SET @sql = 'IF EXISTS (SELECT 1 FROM [' + @databaseName + '].[' + @schemaName + '].[' + @tableName + ']'
+    
+    IF @searchType = 'like'
+      BEGIN
+        IF @columnType IN('varchar','nvarchar','char','nchar')
+          BEGIN
+            SET @sql += ' WHERE [' + @columnName + '] LIKE ' + CHAR(39) + CHAR(37) + @searchTerm + CHAR(37) + CHAR(39) + ')' 
+          END
+        IF @columnType IN ('ntext','text')
+          BEGIN
+            SET @sql += ' WHERE SUBSTRING([' + @columnName + '],1,4000) LIKE ' + CHAR(39) + CHAR(37) + @searchTerm + CHAR(37) + CHAR(39) + ')' 
+          END
+      END
+    
+    IF @searchType = 'equal'
+      BEGIN
+        IF @columnType IN('varchar','nvarchar','char','nchar')
+          BEGIN
+            SET @sql += ' WHERE [' + @columnName + '] = ' + CHAR(39) + @searchTerm + CHAR(39) + ')' 
+          END
+        IF @columnType IN ('ntext','text')
+          BEGIN
+            SET @sql += ' WHERE SUBSTRING([' + @columnName + '],1,4000) = ' + CHAR(39) + @searchTerm + CHAR(39) + ')' 
+          END
+      END
+
+      SET @sql = @sql + '
+       BEGIN
+          UPDATE #findContent
+          SET
+            processed = 1,
+            found = 1
+          WHERE id = ' + CAST(@id AS NVARCHAR(60)) + '
+        END
+      ELSE
+        BEGIN
+          UPDATE #findContent
+          SET 
+            processed = 1
+          WHERE id = ' + CAST(@id AS NVARCHAR(60)) + '
+      END'
+
+      SET @message = 'Searching ' + @databaseName + '.' + @schemaName + '.' + @tableName + '.' + @columnName
+      RAISERROR(@message,0,1)WITH NOWAIT
+      --PRINT @sql  --debugging
+      EXEC sp_executeSQL @sql 
+  END
+
+--gather occurrences
+--update #findContent to show how many rows in the column have the seek criteria
+
+UPDATE #findContent SET processed = 1, found = 1
+
+WHILE EXISTS(SELECT 1 FROM #findContent WHERE processed = 1 AND found = 1)
+  BEGIN
+    SELECT TOP 1 
+      @id = id,
+      @databaseName = databaseName,
+      @schemaName = schemaName,
+      @tableName = tableName,
+      @columnName = columnName,
+      @columnType = columnType
+    FROM #findContent AS findContent
+    WHERE processed = 1
+      AND found = 1
+
+    SET @sql = 'UPDATE #findContent
+      SET 
+        occurrences = getSearch.cItems,
+        processed = 2
+      FROM #findContent AS findContent
+      JOIN (
+        SELECT 
+          COUNT(*) AS cItems
+        FROM [' + @databaseName + '].[' + @schemaName + '].[' + @tableName + ']'
+
+    IF @searchType = 'like'
+      BEGIN
+        IF @columnType IN('varchar','nvarchar','char','nchar')
+          BEGIN
+            SET @sql += ' WHERE [' + @columnName + '] LIKE '  + CHAR(39) + CHAR(37) + @searchTerm + CHAR(37) + CHAR(39)
+          END
+        IF @columnType IN ('ntext','text')
+          BEGIN
+             SET @sql += ' WHERE SUBSTRING([' + @columnName + '],1,4000) LIKE '  + CHAR(39) + CHAR(37) + @searchTerm + CHAR(37) + CHAR(39)
+          END
+      END
+
+    IF @searchType = 'equal'
+      BEGIN
+        IF @columnType IN('varchar','nvarchar','char','nchar')
+          BEGIN
+            SET @sql += ' WHERE [' + @columnName + '] = '  + CHAR(39) + @searchTerm + CHAR(39)
+          END
+        IF @columnType IN ('ntext','text')
+          BEGIN
+             SET @sql += ' WHERE SUBSTRING([' + @columnName + '],1,4000) = '  + CHAR(39) + @searchTerm + CHAR(39)
+          END
+      END
+
+    SET @sql += ') AS getSearch
+              ON findContent.id = ' + CHAR(39) + CAST(@id AS VARCHAR(60)) + CHAR(39)
+
+    SET @message = 'Counting Occurances in table ' + @databaseName + '.' + @schemaName + '.' + @tableName + '.' + @columnName
+    RAISERROR(@message,0,1)WITH NOWAIT
+    --PRINT @sql  --debugging
+    EXEC sp_executeSQL @sql
+    
+  END 
