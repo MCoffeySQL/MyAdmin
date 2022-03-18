@@ -1,0 +1,26 @@
+SET NOCOUNT ON
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+
+DECLARE 
+  @returnRows INT = 50
+
+SELECT TOP (@returnRows)
+  CAST((queryStatus.total_elapsed_time - queryStatus.total_worker_time) / 1000000.0 AS NUMERIC(28,2)) AS timeBlockedTotal_seconds, 
+  CAST(queryStatus.total_worker_time * 100.0 / queryStatus.total_elapsed_time AS NUMERIC(28,2)) AS cpuPercent,
+  CAST((queryStatus.total_elapsed_time - queryStatus.total_worker_time)* 100.0 / queryStatus.total_elapsed_time AS NUMERIC(28, 2)) AS waitingPercent,
+  queryStatus.execution_count AS executionCount,
+  CAST((queryStatus.total_elapsed_time - queryStatus.total_worker_time) / 1000000.0 / queryStatus.execution_count AS NUMERIC(28, 2)) AS blockingAverage,
+  SUBSTRING (sqlText.text,(queryStatus.statement_start_offset/2) + 1,
+    ((CASE 
+        WHEN queryStatus.statement_end_offset = -1
+        THEN LEN(CONVERT(NVARCHAR(MAX), sqlText.[text])) * 2
+        ELSE queryStatus.statement_end_offset
+      END - queryStatus.statement_start_offset)/2) + 1) AS query,
+  sqlText.[text] AS parentQuery,
+  DB_NAME(sqlText.dbid) AS DatabaseName,
+  queryPlan.query_plan
+FROM sys.dm_exec_query_stats queryStatus
+CROSS APPLY sys.dm_exec_sql_text(queryStatus.[sql_handle]) AS sqlText
+CROSS APPLY sys.dm_exec_query_plan(queryStatus.plan_handle) AS queryPlan
+WHERE queryStatus.total_elapsed_time > 0
+ORDER BY timeBlockedTotal_seconds DESC
