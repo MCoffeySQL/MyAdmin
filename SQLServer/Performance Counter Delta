@@ -1,0 +1,53 @@
+--You can determine how the performance counters change over a given time
+--period by calculating the difference between two DMV snapshots, taken at the start
+--and end of a time interval. Running the SQL script given here will show how the performance counters change over the given time interval. In this example, the time
+--period is five minutes; you may want to alter this time interval to suit your needs.
+
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+
+SELECT
+  [object_name], 
+  [counter_name], 
+  [instance_name], 
+  [cntr_value], 
+  [cntr_type]
+INTO #preWorkSnapShot
+FROM sys.dm_os_performance_counters
+
+WAITFOR DELAY '00:05:00'
+
+SELECT
+  [object_name], 
+  [counter_name], 
+  [instance_name], 
+  [cntr_value], 
+  [cntr_type]
+INTO #postWorkSnapShot
+FROM sys.dm_os_performance_counters
+
+SELECT
+  postWorkSnapShot.[object_name], 
+  postWorkSnapShot.counter_name, 
+  postWorkSnapShot.instance_name, 
+  ISNULL(preWorkSnapShot.cntr_value, 0) AS InitialValue, 
+  postWorkSnapShot.cntr_value AS FinalValue, 
+  postWorkSnapShot.cntr_value - ISNULL(preWorkSnapShot.cntr_value, 0) AS Change, 
+  (postWorkSnapShot.cntr_value - ISNULL(preWorkSnapShot.cntr_value, 0)) * 100 / preWorkSnapShot.cntr_value AS [% Change]
+FROM #preWorkSnapShot AS preWorkSnapShot
+RIGHT OUTER JOIN #postWorkSnapShot AS postWorkSnapShot 
+  ON postWorkSnapShot.[object_name] = ISNULL(preWorkSnapShot.[object_name], postWorkSnapShot.[object_name])
+    AND postWorkSnapShot.counter_name = ISNULL(preWorkSnapShot.counter_name, postWorkSnapShot.counter_name)
+    AND postWorkSnapShot.instance_name = ISNULL(preWorkSnapShot.instance_name, postWorkSnapShot.instance_name)
+WHERE postWorkSnapShot.cntr_value - ISNULL(preWorkSnapShot.cntr_value, 0) > 0
+  AND ISNULL(preWorkSnapShot.cntr_value, 0) != 0
+ORDER BY [% Change] DESC, Change DESC
+
+DROP TABLE #preWorkSnapShot
+DROP TABLE #postWorkSnapShot
+
+--The script shown  takes a pre-work snapshot of all of the performance counters 
+--It then waits a given time interval (five minutes in the script example)Get pre-work performance counters
+--Wait a given time interval
+--Get post-work performance counters Calculate changes and takes a post-work snapshot. The script then determines the percentage change in value for each of the counters, for each object, for each instance. The results are sorted by the percentage change in value in descending order. Although sorting by the percentage change in value may be adequate for showing the changes in performance counters in a generic manner, it may not be adequate for a more detailed investigation. In particular, some counters may have a small percentage change in value but have a significant impact on performance. Additionally, the percentage change in value is too dependent on the counter’s initial value. For these reasons, the initial and final values of the performance counters are also output; this will provide raw data for any subsequent analysis. An example of the type of output for this script is shown in figure 6.6. 
+--The example script shows the change in performance counter values over a given time interval. Although this might be useful in cases where you want to determine what’s happening with a batch of SQL that runs periodically, it’s possible to replace the WAITFOR command with a SQL query or batch of SQL that you want to determine the effects of. I’ll show how to do this in section
+--Next, we’ll examine how both the performance counters and wait states change over a given time interval, and you’ll see how the results support and corroborate each other.
