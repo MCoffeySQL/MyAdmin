@@ -1,0 +1,25 @@
+--Indexes with the most pagesplits
+
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+SET NOCOUNT ON 
+
+DECLARE 
+  @returnRows INT = 50
+
+SELECT TOP (@returnRows)
+  sys_schemas.name AS SchemaName,
+  OBJECT_NAME(indexOperationalStats.[object_id]) AS tableName,
+  sys_indexes.name AS IndexName,
+  indexOperationalStats.leaf_allocation_count,
+  indexOperationalStats.nonleaf_allocation_count
+FROM sys.dm_db_index_operational_stats(DB_ID(), NULL, NULL, NULL) AS indexOperationalStats
+INNER JOIN sys.objects AS sys_objects 
+  ON indexOperationalStats.[object_id] = sys_objects.[object_id]
+INNER JOIN sys.indexes AS sys_indexes 
+  ON indexOperationalStats.index_id = sys_indexes.index_id
+AND sys_indexes.[object_id] = sys_objects.[object_id]
+INNER JOIN sys.schemas AS sys_schemas 
+  ON sys_schemas.[schema_id] = sys_objects.[schema_id]
+WHERE indexOperationalStats.leaf_allocation_count > 0
+  AND sys_objects.is_ms_shipped = 0
+ORDER BY indexOperationalStats.leaf_allocation_count DESC
