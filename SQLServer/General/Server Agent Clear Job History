@@ -1,0 +1,10 @@
+-- clear job history 
+
+USE msdb   
+GO  
+
+DECLARE 
+  @jobName NVARCHAR(255) = '{jobName}'
+
+EXEC dbo.sp_purge_jobhistory  
+    @job_name = @jobName  
