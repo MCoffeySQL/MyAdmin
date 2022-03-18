@@ -1,0 +1,26 @@
+SET NOCOUNT ON
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+
+SELECT	
+  DB_NAME() AS databaseName,
+  SCHEMA_NAME(objects.schema_id) AS schemaName,
+  OBJECT_NAME(indexPhysicalStats.[object_id]) AS tableName,
+  indexes.[name] AS indexName,
+  ROUND(indexPhysicalStats.avg_fragmentation_in_percent,2) AS fragmentationPercent,
+  page_count AS [pageCount],
+  fragment_count AS fragmentCount,
+  CASE
+    WHEN ROUND(indexPhysicalStats.avg_fragmentation_in_percent,2) >= 30 THEN 'Rebuild'
+    WHEN ROUND(indexPhysicalStats.avg_fragmentation_in_percent,2) BETWEEN 10 AND 30 THEN 'Reorganization'
+    ELSE NULL
+  END AS recommendedAction
+FROM sys.dm_db_index_physical_stats(db_id(),NULL,NULL,NULL,'SAMPLED') AS indexPhysicalStats
+INNER JOIN sys.indexes 
+  ON indexPhysicalStats.[object_id] = indexes.[object_id]
+    AND indexPhysicalStats.index_id = indexes.index_id
+INNER JOIN sys.objects 
+  ON indexes.[object_id] = objects.[object_id]
+WHERE indexPhysicalStats.database_id = DB_ID()
+  AND indexes.[name] IS NOT NULL
+  AND OBJECTPROPERTY(indexPhysicalStats.[object_id], 'isMSShipped') = 0
+ORDER BY fragmentationPercent DESC
