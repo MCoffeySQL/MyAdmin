@@ -1,0 +1,3 @@
+EXEC msdb.dbo.sp_update_job 
+  @job_name='Your job name',
+  @enabled = 0
